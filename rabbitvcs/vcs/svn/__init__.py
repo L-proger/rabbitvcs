@@ -1225,6 +1225,7 @@ class SVN:
         limit=0,
         discover_changed_paths=True,
         strict_node_history=False,
+        peg_revision=None,
     ):
         """
         Retrieve log items for a given path in the repository
@@ -1243,6 +1244,9 @@ class SVN:
 
         """
 
+        kwargs = {}
+        if peg_revision is not None:
+            kwargs["peg_revision"] = peg_revision.primitive()
         log = self.client.log(
             pure_unicode(url_or_path),
             revision_start.primitive(),
@@ -1250,6 +1254,7 @@ class SVN:
             discover_changed_paths,
             strict_node_history,
             limit,
+            **kwargs,
         )
 
         returner = []

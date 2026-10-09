@@ -348,6 +348,105 @@ class SVNBrowserDialog(SVNBrowser):
             self.callback(path)
 
 
+class SVNDirectoryBrowserDialog(SVNBrowser):
+    """Read-only directory picker for Switch, at its selected revision."""
+
+    def __init__(self, url, revision, callback, parent, root_url):
+        self.closed = False
+        self.callback = callback
+        self.browse_revision = revision
+        self.root_url = str(root_url).rstrip("/")
+        self.request = None
+        SVNBrowser.__init__(self, "")
+        window = self.get_widget("Browser")
+        window.set_title(_("Select repository directory"))
+        window.set_transient_for(parent)
+        window.set_modal(True)
+        window.set_destroy_with_parent(True)
+        self.get_widget("create_folder_here").hide()
+        self.get_widget("revision_container").set_sensitive(False)
+        if revision.kind == "number":
+            self.revision_selector.set_kind_number(revision.value)
+        self.change_button("close", _("_Select"), "rabbitvcs-ok")
+        cancel = Gtk.Button.new_with_mnemonic(_("_Cancel"))
+        cancel.connect("clicked", self.on_cancel_clicked)
+        self.get_widget("close").get_parent().add(cancel)
+        cancel.show()
+        self.list_table.treeview.get_selection().set_mode(Gtk.SelectionMode.SINGLE)
+        self.list_table.treeview.get_selection().connect("changed", self.update_selection)
+        self.urls.set_child_text(helper.unquote_url(url))
+        self.load()
+
+    def load(self):
+        if self.closed:
+            return
+        if self.request is not None:
+            self.request.set_cancel(True)
+        self.get_widget("close").set_sensitive(False)
+        self.items = []
+        self.list_table.clear()
+        url = helper.quote_url(self.urls.get_active_text())
+        action = rabbitvcs.ui.action.SVNAction(self.svn, notification=False)
+        self.request = action
+        action.append(self.svn.list, url, revision=self.browse_revision, recurse=False)
+        action.append(self.populate_selection, action, url)
+        action.schedule()
+
+    @gtk_unsafe
+    def populate_selection(self, action, url):
+        if self.closed or action is not self.request:
+            return
+        items = action.get_result(0)
+        if not items:
+            return
+        self.url = url
+        self.items = sorted(items, key=self.sort_files_key)
+        self.list_table.clear()
+        if url.rstrip("/") != self.root_url:
+            self.list_table.append([S(".."), "..", 0, 0, "", 0])
+        for item, locked in self.items:
+            if helper.unquote_url(str(item.path)).rstrip("/") == helper.unquote_url(url).rstrip("/"):
+                continue
+            self.list_table.append([S(item.path), item.path, item.created_rev.number,
+                                    item.size, item.last_author, item.time])
+        self.update_selection()
+
+    def selected_directory(self):
+        if not self.items:
+            return None
+        model, iterator = self.list_table.treeview.get_selection().get_selected()
+        path = str(model[iterator][0]) if iterator is not None else str(self.url)
+        if path == "..":
+            return str(self.url).rstrip("/").rsplit("/", 1)[0]
+        for item, locked in self.items:
+            if helper.unquote_url(str(item.path)).rstrip("/") == helper.unquote_url(path).rstrip("/"):
+                return path if self.svn.NODE_KINDS_REVERSE[item.kind] == "dir" else None
+        return None
+
+    def update_selection(self, *args):
+        self.get_widget("close").set_sensitive(bool(self.selected_directory()))
+
+    def on_row_activated(self, *args):
+        path = self.selected_directory()
+        if path:
+            self.urls.set_child_text(helper.unquote_url(path))
+            self.load()
+
+    def on_list_table_mouse_event(self, *args):
+        pass
+
+    def on_close_clicked(self, widget, data=None):
+        path = self.selected_directory()
+        if path:
+            self.callback(path)
+            self.close()
+
+    def on_destroy(self, widget):
+        self.closed = True
+        if self.request is not None:
+            self.request.set_cancel(True)
+
+
 class MenuCreateRepositoryFolder(MenuItem):
     identifier = "RabbitVCS::Create_Repository_Folder"
     label = _("Create folder...")

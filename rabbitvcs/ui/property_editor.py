@@ -179,7 +179,7 @@ class PropEditor(InterfaceView, GtkContextMenuCaller):
 
         value = self.svn.propget(self.path, name)
 
-        dialog = rabbitvcs.ui.dialog.Property(name, value)
+        dialog = rabbitvcs.ui.dialog.Property(name, value, path=self.path)
 
         name, value, recurse = dialog.run()
         if name:

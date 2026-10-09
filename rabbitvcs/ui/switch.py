@@ -46,6 +46,7 @@ class SVNSwitch(InterfaceView):
         self.path = path
         self.vcs = rabbitvcs.vcs.VCS()
         self.svn = self.vcs.svn()
+        self.repo_browser = None
 
         self.get_widget("path").set_text(S(self.path).display())
         self.repositories = rabbitvcs.ui.widget.ComboBox(
@@ -63,6 +64,22 @@ class SVNSwitch(InterfaceView):
         self.repositories.set_child_text(
             helper.unquote_url(self.svn.get_repo_url(self.path))
         )
+
+    def on_repo_browser_clicked(self, widget):
+        from rabbitvcs.ui.browser import SVNDirectoryBrowserDialog
+
+        if self.repo_browser is not None and not self.repo_browser.closed:
+            self.repo_browser.get_widget("Browser").present()
+            return
+        url = self.repositories.get_active_text() or self.svn.get_repo_url(self.path)
+        self.repo_browser = SVNDirectoryBrowserDialog(
+            url, self.revision_selector.get_revision_object(),
+            self.on_repo_browser_selected, self.get_widget("Switch"),
+            self.svn.get_repo_root_url(self.path),
+        )
+
+    def on_repo_browser_selected(self, url):
+        self.repositories.set_child_text(helper.unquote_url(url))
 
     def on_ok_clicked(self, widget):
         url = self.repositories.get_active_text()

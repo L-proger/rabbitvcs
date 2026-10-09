@@ -80,14 +80,14 @@ class PropertiesBase(InterfaceView):
         self.save()
 
     def on_new_clicked(self, widget):
-        dialog = rabbitvcs.ui.dialog.Property()
+        dialog = rabbitvcs.ui.dialog.Property(path=self.path)
         name, value, recurse = dialog.run()
         if name:
             self.table.append([recurse, name, value])
 
     def on_edit_clicked(self, widget):
         (recurse, name, value) = self.get_selected_name_value()
-        dialog = rabbitvcs.ui.dialog.Property(name, value)
+        dialog = rabbitvcs.ui.dialog.Property(name, value, path=self.path)
         name, value, recurse = dialog.run()
         if name:
             self.set_selected_name_value(name, value, recurse)
@@ -160,7 +160,7 @@ class SVNProperties(PropertiesBase):
 
         if self.proplist:
             for key, val in list(self.proplist.items()):
-                self.table.append([False, key, val.rstrip()])
+                self.table.append([False, key, val])
 
     def save(self):
         delete_recurse = self.get_widget("delete_recurse").get_active()

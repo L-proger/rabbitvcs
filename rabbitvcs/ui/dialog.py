@@ -242,7 +242,7 @@ class SSLClientCertPrompt(InterfaceView):
 
 
 class Property(InterfaceView):
-    def __init__(self, name="", value="", recurse=True):
+    def __init__(self, name="", value="", recurse=True, path=None):
         InterfaceView.__init__(self, "dialogs/property", "Property")
 
         self.save_name = name
@@ -274,6 +274,32 @@ class Property(InterfaceView):
 
         self.recurse = self.get_widget("property_recurse")
         self.recurse.set_active(recurse)
+        self.path = path
+        self.externals_editor = None
+        self.get_widget("property_name").get_child().connect(
+            "changed", self.on_property_name_changed
+        )
+        self.on_property_name_changed()
+
+    def on_property_name_changed(self, *args):
+        is_external = self.name.get_active_text() == "svn:externals"
+        scroll = self.get_widget("scrolledwindow1")
+        if is_external and self.externals_editor is None:
+            from rabbitvcs.ui.externals import ExternalsEditor
+
+            self.externals_editor = ExternalsEditor(self.path, self.value.get_text())
+            grid = scroll.get_parent()
+            grid.attach(self.externals_editor, 1, 1, 1, 1)
+            scroll.hide()
+            self.get_widget("Property").resize(850, 460)
+        elif not is_external and self.externals_editor is not None:
+            self.value.set_text(self.externals_editor.get_text())
+            self.externals_editor.destroy()
+            self.externals_editor = None
+            scroll.show()
+        if is_external:
+            self.recurse.set_active(False)
+        self.recurse.set_sensitive(not is_external)
 
     def run(self):
         self.dialog = self.get_widget("Property")
@@ -282,12 +308,15 @@ class Property(InterfaceView):
         if result == Gtk.ResponseType.OK:
             self.save()
 
+        recurse = self.recurse.get_active()
         self.dialog.destroy()
-        return (self.save_name, self.save_value, self.recurse.get_active())
+        if result != Gtk.ResponseType.OK:
+            return (None, None, False)
+        return (self.save_name, self.save_value, recurse)
 
     def save(self):
         self.save_name = self.name.get_active_text()
-        self.save_value = self.value.get_text()
+        self.save_value = self.externals_editor.get_text() if self.externals_editor else self.value.get_text()
         self.save_recurse = self.recurse.get_active()
 
 

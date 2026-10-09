@@ -76,6 +76,7 @@ class Commit(InterfaceView, GtkContextMenuCaller):
         self.base_dir = base_dir
         self.vcs = rabbitvcs.vcs.VCS()
         self.items = []
+        self.changes = {}
 
         self.files_table = rabbitvcs.ui.widget.Table(
             self.get_widget("files_table"),
@@ -86,6 +87,8 @@ class Commit(InterfaceView, GtkContextMenuCaller):
                 GObject.TYPE_STRING,
                 rabbitvcs.ui.widget.TYPE_STATUS,
                 GObject.TYPE_STRING,
+                rabbitvcs.ui.widget.TYPE_HIDDEN_OBJECT,
+                GObject.TYPE_STRING,
             ],
             [
                 rabbitvcs.ui.widget.TOGGLE_BUTTON,
@@ -94,6 +97,8 @@ class Commit(InterfaceView, GtkContextMenuCaller):
                 _("Extension"),
                 _("Text Status"),
                 _("Property Status"),
+                "",
+                _("Commit"),
             ],
             filters=[
                 {
@@ -110,6 +115,13 @@ class Commit(InterfaceView, GtkContextMenuCaller):
             flags={"sortable": True, "sort_on": 2},
         )
         self.files_table.allow_multiple()
+        columns = self.files_table.treeview.get_columns()
+        columns[7].set_visible(False)
+        for column in columns[:6]:
+            for cell in column.get_cells():
+                column.add_attribute(cell, "sensitive", 6)
+                if isinstance(cell, Gtk.CellRendererToggle):
+                    column.add_attribute(cell, "activatable", 6)
         self.get_widget("toggle_show_unversioned").set_active(self.SHOW_UNVERSIONED)
         if not message:
             message = self.SETTINGS.get_multiline("general", "default_commit_message")
@@ -137,8 +149,14 @@ class Commit(InterfaceView, GtkContextMenuCaller):
         self.items = self.vcs.get_items(
             self.paths, self.vcs.statuses_for_commit(self.paths)
         )
-
+        self.prepare_commit_scope()
         self.populate_files_table()
+
+    def prepare_commit_scope(self):
+        pass
+
+    def commit_block_reason(self, path):
+        return ""
 
     # Overrides the GtkContextMenuCaller method
     def on_context_menu_command_finished(self):
@@ -191,6 +209,10 @@ class Commit(InterfaceView, GtkContextMenuCaller):
         self.initialize_items()
 
     def on_key_pressed(self, widget, event, *args):
+        if event.keyval == Gdk.KEY_F5:
+            self.on_refresh_clicked(widget)
+            return True
+
         if InterfaceView.on_key_pressed(self, widget, event, *args):
             return True
 
@@ -205,8 +227,8 @@ class Commit(InterfaceView, GtkContextMenuCaller):
         self.TOGGLE_ALL = not self.TOGGLE_ALL
         self.changes.clear()
         for row in self.files_table.get_items():
-            row[0] = self.TOGGLE_ALL
-            self.changes[row[1]] = self.TOGGLE_ALL
+            row[0] = self.TOGGLE_ALL and not self.commit_block_reason(row[1])
+            self.changes[row[1]] = row[0]
 
     def on_toggle_show_unversioned_toggled(self, widget, *args):
         self.SHOW_UNVERSIONED = widget.get_active()
@@ -254,6 +276,7 @@ class Commit(InterfaceView, GtkContextMenuCaller):
         n = 0
         m = 0
         for item in self.items:
+            reason = self.commit_block_reason(item.path)
             if item.path in self.changes:
                 checked = self.changes[item.path]
             else:
@@ -269,12 +292,14 @@ class Commit(InterfaceView, GtkContextMenuCaller):
 
             self.files_table.append(
                 [
-                    checked,
+                    checked and not reason,
                     S(item.path),
                     item.path,
                     helper.get_file_extension(item.path),
                     item.simple_content_status(),
                     item.simple_metadata_status(),
+                    not reason,
+                    reason,
                 ]
             )
         self.get_widget("status").set_text(
@@ -285,7 +310,10 @@ class Commit(InterfaceView, GtkContextMenuCaller):
 
 class SVNCommit(Commit):
     def __init__(self, paths, base_dir=None, message=None):
+        self.blocked_paths = {}
         Commit.__init__(self, paths, base_dir, message)
+
+        self.files_table.treeview.get_columns()[7].set_visible(True)
 
         self.get_widget("commit_to_box").show()
 
@@ -297,8 +325,26 @@ class SVNCommit(Commit):
         if self.paths:
             self.initialize_items()
 
+    def prepare_commit_scope(self):
+        from rabbitvcs.util.commit_scope import CommitScope
+
+        self.blocked_paths = {}
+        if not self.paths:
+            return
+        scope = CommitScope(self.vcs.svn().client, self.paths[0])
+        for item in self.items:
+            identity = scope.repository(item.path, unversioned=not item.is_versioned())
+            if identity is None or scope.target is None:
+                self.blocked_paths[S(item.path)] = _("Cannot determine repository")
+            elif identity != scope.target:
+                self.blocked_paths[S(item.path)] = _("Different repository — commit separately")
+
+    def commit_block_reason(self, path):
+        return self.blocked_paths.get(S(path), "")
+
     def on_ok_clicked(self, widget, data=None):
-        items = self.files_table.get_activated_rows(1)
+        items = [path for path in self.files_table.get_activated_rows(1)
+                 if not self.commit_block_reason(path)]
         self.hide()
 
         if len(items) == 0:
@@ -345,6 +391,8 @@ class SVNCommit(Commit):
         )
 
     def on_files_table_toggle_event(self, row, col):
+        if self.commit_block_reason(row[1]):
+            row[col] = False
         # Adds path: True/False to the dict
         self.changes[row[1]] = row[col]
 

@@ -399,10 +399,11 @@ class Log(InterfaceView):
 
 
 class SVNLog(Log):
-    def __init__(self, path, merge_candidate_revisions=None):
+    def __init__(self, path, merge_candidate_revisions=None, peg_revision=None):
         Log.__init__(self, path)
 
         self.svn = self.vcs.svn()
+        self.peg_revision = peg_revision
         self.merge_candidate_revisions = merge_candidate_revisions
 
         self.revisions_table = rabbitvcs.ui.widget.Table(
@@ -473,6 +474,7 @@ class SVNLog(Log):
             self.revision_items = self.action.get_result(0)
 
         if not self.revision_items or len(self.revision_items) == 0:
+            self.set_loading(False)
             return
 
         # Get the starting/ending point from the actual returned revisions
@@ -550,7 +552,7 @@ class SVNLog(Log):
 
         self.action = SVNAction(self.svn, notification=False)
 
-        start = self.svn.revision("head")
+        start = self.peg_revision or self.svn.revision("head")
         if self.rev_start:
             start = self.svn.revision("number", number=self.rev_start)
         if os.environ.get('RABBITVCS_REVISION_START') is not None:
@@ -561,6 +563,7 @@ class SVNLog(Log):
                 self.svn.log,
                 self.path,
                 revision_start=start,
+                peg_revision=self.peg_revision,
                 limit=self.limit,
                 discover_changed_paths=True,
             )
@@ -569,6 +572,7 @@ class SVNLog(Log):
                 self.svn.log,
                 self.path,
                 revision_start=start,
+                peg_revision=self.peg_revision,
                 revision_end=self.svn.revision("number", number=os.environ.get('RABBITVCS_REVISION_END')),
                 discover_changed_paths=True,
             )
@@ -966,6 +970,62 @@ class SVNLogDialog(SVNLog):
                 self.ok_callback(self.get_selected_revision_numbers())
             else:
                 self.ok_callback(self.get_selected_revision_number())
+
+
+class ExternalLogDialog(SVNLog):
+    """Single revision picker; cancellation never selects a revision."""
+
+    def __init__(self, path, callback, peg_revision):
+        self.callback = callback
+        self.closed = False
+        SVNLog.__init__(self, path, peg_revision=peg_revision)
+        self.change_button("close", _("OK"), "rabbitvcs-ok")
+        self.revisions_table.treeview.get_selection().set_mode(Gtk.SelectionMode.SINGLE)
+        button = self.get_widget("close")
+        button.set_sensitive(False)
+        self.revisions_table.treeview.get_selection().connect(
+            "changed", lambda selection: button.set_sensitive(bool(self.get_selected_revision_number()))
+        )
+        cancel = Gtk.Button(label=_("Cancel"))
+        cancel.connect("clicked", self.on_cancel_clicked)
+        button.get_parent().add(cancel)
+        cancel.show()
+
+    def get_selected_revision_number(self):
+        model, iterator = self.revisions_table.treeview.get_selection().get_selected()
+        return model[iterator][0] if iterator is not None else ""
+
+    def refresh(self):
+        if not self.closed:
+            super().refresh()
+
+    def on_destroy(self, widget, data=None):
+        self.closed = True
+        if self.is_loading:
+            self.action.set_cancel(True)
+
+    def initialize_root_url(self):
+        # Resolve at the peg: this URL may have been deleted or renamed at HEAD.
+        action = SVNAction(self.svn, notification=False, run_in_thread=False)
+        def root():
+            info = self.svn.client.info2(self.path, revision=self.peg_revision.primitive(),
+                                         peg_revision=self.peg_revision.primitive(), recurse=False)
+            return info[0][1]["repos_root_URL"]
+        self.root_url = action.run_single(root)
+
+    def on_close_clicked(self, widget, data=None):
+        selected = self.get_selected_revision_number()
+        if selected != "":
+            self.callback(selected)
+            self.on_cancel_clicked(widget)
+
+    def on_cancel_clicked(self, widget):
+        if self.closed:
+            return
+        self.closed = True
+        if self.is_loading:
+            self.action.set_cancel(True)
+        self.close()
 
 
 class GitLogDialog(GitLog):

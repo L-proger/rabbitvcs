@@ -1,0 +1,11 @@
+#!/bin/sh
+# Temporary launcher for the GTK transient-window crash in native Wayland.
+# Usage: scripts/run-xwayland properties /path/to/working-copy
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}"
+export GDK_BACKEND=x11
+# Use the host schemas, not schemas inherited from a confined IDE.
+export GSETTINGS_SCHEMA_DIR=/usr/share/glib-2.0/schemas
+export PYTHON=/usr/bin/python3
+exec /usr/bin/python3 "$project_dir/clients/cli/rabbitvcs" "$@"
